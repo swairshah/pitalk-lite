@@ -1,6 +1,6 @@
-# pitalk-lite (PiTalk Lite local workspace)
+# pitalk-lite
 
-This directory is the **single source of truth** for your Linux PiTalk-lite setup.
+A lite weight version of https://github.com/swairshah/PiTalk for my old linux box.  Uses remote models but gives `pi.dev` sessions a voice :).
 
 ## Main files
 - `linux_tts_broker.py` — local broker (OpenAI TTS, queueing, mic-aware behavior)
