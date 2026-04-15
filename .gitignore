@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# Tooling caches
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.pyre/
+.tox/
+.nox/
+.coverage
+coverage.xml
+htmlcov/
+
+# Local env / secrets
+.env
+.env.*
+*.local
+
+# Logs and runtime artifacts
+*.log
+*.pid
+*.tmp
+*.swp
+
+# Editor/OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Project-local generated artifacts (if created later)
+build/
+dist/
+.cache/
