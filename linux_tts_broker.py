@@ -216,49 +216,64 @@ def json_line(payload: dict) -> bytes:
     return (json.dumps(payload, separators=(",", ":")) + "\n").encode("utf-8")
 
 
-def detect_mic_active() -> bool:
-    """
-    Detect microphone activity using PulseAudio/PipeWire via pactl.
-    Returns True when default input source is RUNNING.
-    """
-    if shutil.which("pactl") is None:
-        return False
+import struct
 
-    default_source = None
-    try:
-        default_source = subprocess.check_output(
-            ["pactl", "get-default-source"],
-            stderr=subprocess.DEVNULL,
-            text=True,
-            timeout=2,
-        ).strip() or None
-    except Exception:
-        pass
+MIC_LEVEL_RATE = 16000
+MIC_LEVEL_THRESHOLD = int(os.getenv("PITALK_MIC_THRESHOLD", "400"))
 
+_parec_proc: Optional[subprocess.Popen] = None
+
+
+def _ensure_parec() -> Optional[subprocess.Popen]:
+    global _parec_proc
+    if _parec_proc is not None and _parec_proc.poll() is None:
+        return _parec_proc
+    if shutil.which("parec") is None:
+        return None
     try:
-        output = subprocess.check_output(
-            ["pactl", "list", "short", "sources"],
+        _parec_proc = subprocess.Popen(
+            [
+                "parec", "--raw", "--channels=1",
+                "--format=s16le", f"--rate={MIC_LEVEL_RATE}",
+                "--process-time-msec=50",
+                "--latency-msec=100",
+            ],
+            stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
-            text=True,
-            timeout=2,
+            stdin=subprocess.DEVNULL,
         )
+        return _parec_proc
+    except OSError:
+        return None
+
+
+def _kill_parec() -> None:
+    global _parec_proc
+    if _parec_proc is not None:
+        try:
+            _parec_proc.terminate()
+            _parec_proc.wait(timeout=2)
+        except Exception:
+            pass
+        _parec_proc = None
+
+
+def detect_mic_active() -> bool:
+    """Detect speech on the mic by reading audio levels from parec."""
+    proc = _ensure_parec()
+    if proc is None or proc.stdout is None:
+        return False
+    chunk_bytes = int(MIC_LEVEL_RATE * MIC_POLL_INTERVAL) * 2
+    try:
+        data = proc.stdout.read(chunk_bytes)
     except Exception:
         return False
-
-    any_running = False
-    for line in output.splitlines():
-        cols = line.split("\t")
-        if len(cols) < 2:
-            continue
-        name = cols[1]
-        state_col = cols[-1].strip().upper() if cols else ""
-        is_running = state_col == "RUNNING"
-        if is_running:
-            any_running = True
-        if default_source and name == default_source:
-            return is_running
-
-    return any_running
+    if not data or len(data) < 4:
+        return False
+    n_samples = len(data) // 2
+    samples = struct.unpack(f"<{n_samples}h", data[:n_samples * 2])
+    rms = (sum(s * s for s in samples) / n_samples) ** 0.5
+    return rms > MIC_LEVEL_THRESHOLD
 
 
 async def set_mic_active(active: bool) -> None:
@@ -582,6 +597,8 @@ async def main() -> None:
             await task
         except asyncio.CancelledError:
             pass
+
+    _kill_parec()
 
 
 if __name__ == "__main__":
