@@ -307,10 +307,12 @@ class TrayApp:
 
         self.menu = Gtk.Menu()
         self.updating_speed_ui = False
+        self.updating_enabled_ui = False
         self.last_summary_label = ""
         self.last_icon = ""
         self.last_sessions_fingerprint = ""
         self.last_speed_value: float | None = None
+        self.last_enabled_value: bool | None = None
         self.last_spend_value = "$--"
         self.last_spend_fetch_ts = 0.0
         self.summary_item = Gtk.MenuItem(label="PiTalk Lite")
@@ -338,6 +340,10 @@ class TrayApp:
             self.speed_radio_items.append(item)
         self.speed_item.set_submenu(self.speed_submenu)
         self.menu.append(self.speed_item)
+
+        self.enabled_item = Gtk.CheckMenuItem(label="Voice output enabled")
+        self.enabled_item.connect("toggled", self.on_enabled_toggled)
+        self.menu.append(self.enabled_item)
 
         self.menu.append(Gtk.SeparatorMenuItem())
 
@@ -457,9 +463,12 @@ class TrayApp:
         total = int(sessions_res.get("summary", {}).get("total", 0))
         mic_active = bool(sessions_res.get("micActive"))
         speed = float(config_res.get("speechSpeed", 1.0)) if config_res.get("ok") else 1.0
+        enabled = bool(config_res.get("speechEnabled", True)) if config_res.get("ok") else True
 
         status = "speaking" if speaking > 0 else "idle"
-        if mic_active:
+        if not enabled:
+            status = "voice off"
+        elif mic_active:
             status = "mic active"
 
         self._set_summary_once(f"PiTalk Lite: {total} sessions, {status}, speed {speed:.1f}x")
@@ -475,6 +484,12 @@ class TrayApp:
                 item.set_active(abs(speed - preset) < 0.05)
             self.updating_speed_ui = False
             self.last_speed_value = speed
+
+        if self.last_enabled_value is None or self.last_enabled_value != enabled:
+            self.updating_enabled_ui = True
+            self.enabled_item.set_active(enabled)
+            self.updating_enabled_ui = False
+            self.last_enabled_value = enabled
 
         fp = self._sessions_fingerprint(sessions)
         if fp != self.last_sessions_fingerprint:
@@ -495,13 +510,19 @@ class TrayApp:
         self.refresh(force_spend=True)
 
     def on_stop(self, _item: Gtk.MenuItem) -> None:
-        broker_cmd({"type": "stop"})
+        broker_cmd({"type": "stopCurrent"})
         self.refresh()
 
     def on_speed_selected(self, item: Gtk.RadioMenuItem, speed: float) -> None:
         if self.updating_speed_ui or not item.get_active():
             return
         broker_cmd({"type": "config", "speechSpeed": speed})
+        self.refresh()
+
+    def on_enabled_toggled(self, item: Gtk.CheckMenuItem) -> None:
+        if self.updating_enabled_ui:
+            return
+        broker_cmd({"type": "config", "speechEnabled": item.get_active()})
         self.refresh()
 
     def on_jump(self, _item: Gtk.MenuItem, pid: int) -> None:

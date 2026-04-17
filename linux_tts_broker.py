@@ -109,6 +109,7 @@ class BrokerState:
         self.voice_cycle_idx = 0
         self.agent_statuses: dict[int, AgentStatus] = {}
         self.speech_speed = self._initial_speech_speed()
+        self.speech_enabled = self._initial_speech_enabled()
 
     def _initial_speech_speed(self) -> float:
         raw = os.getenv("PITALK_SPEECH_SPEED", "1.0")
@@ -120,6 +121,10 @@ class BrokerState:
     @staticmethod
     def clamp_speed(value: float) -> float:
         return max(0.7, min(2.0, round(value, 2)))
+
+    def _initial_speech_enabled(self) -> bool:
+        raw = (os.getenv("PITALK_SPEECH_ENABLED", "1") or "1").strip().lower()
+        return raw not in {"0", "false", "off", "no"}
 
     def queue_key(self, source_app: Optional[str], session_id: Optional[str]) -> str:
         app = (source_app or "unknown").strip() or "unknown"
@@ -147,6 +152,7 @@ class BrokerState:
             "currentQueue": self.current_job.queue_key if self.current_job else None,
             "micActive": self.is_mic_active,
             "speechSpeed": self.speech_speed,
+            "speechEnabled": self.speech_enabled,
         }
 
     def queue_counts(self) -> dict[str, int]:
@@ -377,7 +383,7 @@ async def stream_openai_to_ffplay(text: str, voice: str, speech_speed: float) ->
 async def playback_worker() -> None:
     while True:
         async with state.condition:
-            while not state.pending or state.is_mic_active:
+            while not state.pending or state.is_mic_active or not state.speech_enabled:
                 await state.condition.wait()
             job = state.pending.pop(0)
             state.current_job = job
@@ -464,7 +470,19 @@ async def handle_broker_client(reader: asyncio.StreamReader, writer: asyncio.Str
                 raw_speed = req.get("speechSpeed")
                 if isinstance(raw_speed, (int, float)):
                     state.speech_speed = BrokerState.clamp_speed(float(raw_speed))
-                payload = {"ok": True, "speechSpeed": state.speech_speed}
+
+                raw_enabled = req.get("speechEnabled")
+                if isinstance(raw_enabled, bool) and raw_enabled != state.speech_enabled:
+                    state.speech_enabled = raw_enabled
+                    if not state.speech_enabled:
+                        state.pending = []
+                        if state.current_job is not None:
+                            state.stop_requested_current = True
+                        if state.current_proc and state.current_proc.returncode is None:
+                            interrupt_process(state.current_proc)
+                    state.condition.notify_all()
+
+                payload = {"ok": True, "speechSpeed": state.speech_speed, "speechEnabled": state.speech_enabled}
             writer.write(json_line(payload))
             await writer.drain()
             return
@@ -489,11 +507,31 @@ async def handle_broker_client(reader: asyncio.StreamReader, writer: asyncio.Str
             )
 
             async with state.condition:
+                if not state.speech_enabled:
+                    queued = len(state.pending) + (1 if state.current_job else 0)
+                    writer.write(json_line({"ok": True, "queued": queued, "dropped": True, "reason": "speech disabled"}))
+                    await writer.drain()
+                    return
                 state.pending.append(job)
                 queued = len(state.pending) + (1 if state.current_job else 0)
                 state.condition.notify()
 
             writer.write(json_line({"ok": True, "queued": queued}))
+            await writer.drain()
+            return
+
+        if cmd == "stopCurrent":
+            source_app = req.get("sourceApp")
+            session_id = req.get("sessionId")
+
+            async with state.condition:
+                if state.current_job and job_matches(state.current_job, source_app, session_id):
+                    state.stop_requested_current = True
+                    if state.current_proc and state.current_proc.returncode is None:
+                        interrupt_process(state.current_proc)
+                state.condition.notify_all()
+
+            writer.write(json_line({"ok": True, **state.state()}))
             await writer.drain()
             return
 

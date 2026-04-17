@@ -81,8 +81,10 @@ Unknown voice names are mapped/fallbacked automatically.
 ## Extra broker commands (for tray/UI)
 
 - `{"type":"sessions"}` -> returns active session list + summary
-- `{"type":"config"}` -> returns current config (`speechSpeed`)
+- `{"type":"config"}` -> returns current config (`speechSpeed`, `speechEnabled`)
 - `{"type":"config","speechSpeed":1.2}` -> updates playback speed
+- `{"type":"config","speechEnabled":false}` -> toggle voice output on/off
+- `{"type":"stopCurrent"}` -> interrupt only the current playback (does not clear queue)
 
 ## Microphone-aware behavior
 
