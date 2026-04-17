@@ -23,7 +23,8 @@ MIC_POLL_INTERVAL = 0.25
 MIC_RELEASE_DELAY = 0.8
 AGENT_STATUS_STALE_SECONDS = 5 * 60
 
-VOICE_PRIORITY = ["fable", "alloy", "echo", "nova", "onyx", "shimmer"]
+
+VOICE_PRIORITY = ["fable", "nova", "shimmer", "alloy"]
 
 VOICE_MAP = {
     # PiTalk local-style voices
